@@ -1,0 +1,41 @@
+Memcache client for AOLServer 4.x
+Release 0.1
+vlad@crystalballinc.com
+
+This is AOLServer module that implements client protocol to communicate with
+memcached server
+
+/*--------------------------------------------------------------------*/
+
+
+ Configuration
+
+   nsd.tcl
+
+   ns_section    ns/server/$server/modules
+   ns_param      nsmemcache            nsmemcache.so
+
+   ns_section    ns/server/$server/module/nsmemcache
+   ns_param      server                localhost
+   ns_param      server                cache
+
+ Usage
+
+   ns_memcache get key dataVar ?lengthVar? ?flagsVar?
+
+   ns_memcache set key value ?expires? ?flags?
+
+   ns_memcache add key value ?expires? ?flags?
+
+   ns_memcache replace key value ?expires? ?flags?
+
+   ns_memcache delete key ?expires?
+
+   ns_memcache incr key value ?varname?
+
+   ns_memcache decr key value ?varname?
+
+
+ Authors
+
+     Vlad Seryakov vlad@crystalballinc.com

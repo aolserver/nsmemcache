@@ -1,0 +1,48 @@
+Memcache client for AOLServer 4.0.10
+Release 0.1
+majidkhan59@yahoo.com
+
+This is AOLServer module that implements client protocol to communicate with
+memcached server
+
+/*--------------------------------------------------------------------*/
+
+
+ Configuration
+ 
+   nsd.tcl
+ 
+   ns_section    ns/servers/server/modules
+   ns_param      nsmemcache    		nsmemcache.so
+ 
+   ns_section    ns/server/module/nsmemcache
+   ns_param      server                localhost
+   ## If you have more then one server then define it in a new line
+   ns_param	 server		       cache
+
+ Usage
+
+   ns_memcache get key dataVar ?lengthVar? ?flagsVar?
+
+   ## This command set the value in a unique key and if key already exists then the old value
+   ## replaced with the new one
+   ns_memcache set key value ?expires? ?flags?
+
+   ## This command add the value one time and if you 
+   ## add again with the same key in your script then it will not be overriden
+   ## If you want to override the value of the same key then use replace one 
+   ns_memcache add key value ?expires? ?flags?
+
+   ns_memcache replace key value ?expires? ?flags?
+
+   ns_memcache delete key ?expires?
+
+   ns_memcache incr key value ?varname?
+
+   ns_memcache decr key value ?varname?
+
+
+ Authors
+ 
+     Vlad Seryakov vlad@crystalballinc.com
+

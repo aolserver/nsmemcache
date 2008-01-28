@@ -1,0 +1,133 @@
+32a33,35
+>  *
+>  * Ported for AOLserver by:
+>  *	Majid Khan majidkhan59@gmail.com
+35a39,40
+> #include "nsmemfunc.h"
+> #include "nsmemsock.h"
+46a52,53
+> int Ns_ModuleVersion = 1;
+> 
+182c189,192
+<     Ns_TclRegisterTrace(server, MCInterpInit, mc, NS_TCL_TRACE_CREATE);
+---
+>     // For AOL 4.0.10
+>     Ns_TclInitInterps(server, MCInterpInit, mc);
+>     // For AOL 4.5 uncomment the following line and comment out the above Ns_TclInitInterps statement
+>     //Ns_TclRegisterTrace(server, MCInterpInit, mc, NS_TCL_TRACE_CREATE);
+240c250
+<        cmd = mc_get(mc, key, &data, &size, &flags);
+---
+>        cmd = mc_get(mc, key, &data, (size_t *) &size, &flags);// casted 4th arghment by Majid
+309c319
+<        cmd = mc_areplace(mc, key, data, size, expires, flags, &data2, &size2, &flags2);
+---
+>        cmd = mc_areplace(mc, key, data, size, expires, flags, &data2, (size_t*) &size2, &flags2);// casted 8th arghment by Majid
+397d406
+<     Ns_Time timeout = { TIMEOUT, 0 };
+399c408,411
+<     sock = Ns_SockTimedConnect((char*)ms->host, ms->port, &timeout);
+---
+>     // Commented by Majid
+>     //Ns_Time timeout = { TIMEOUT, 0 };
+>     //sock = Ns_SockTimedConnect((char*)ms->host, ms->port, &timeout);
+>     sock = Ns_SockTimedConnect((char*)ms->host, ms->port, ms->timeout);// Added by Majid
+451c463
+<     Ns_Time timeout = { conn->ms->timeout, 0 };
+---
+>     //Ns_Time timeout = { conn->ms->timeout, 0 }; // commented by Majid
+459c471,473
+<         n = Ns_SockRecv(conn->sock, conn->ds.string + nread, len, &timeout);
+---
+>         n = Ns_SockRecv(conn->sock, conn->ds.string + nread, len, conn->ms->timeout); // Added by Majid
+>         //n = Ns_SockRecv(conn->sock, conn->ds.string + nread, len, &timeout); //commented by Majid
+> 
+614c628,630
+<     Ns_Time wait = { 0, 0 };
+---
+>    
+>    // Commented by Majid
+>    //Ns_Time wait = { 0, 0 };
+640,641c656,660
+<     wait.sec = ms->timeout;
+<     rc = Ns_SockWriteV(conn->sock, vec, 3, &wait);
+---
+>     // Commented out by Majid
+>     //wait.sec = ms->timeout;
+>     //rc = Ns_SockWriteV(conn->sock, vec, 3, &wait);
+>     
+>     rc = Ns_SockWriteV(conn->sock, vec, 3, ms->timeout);// Added by Majid
+676c695,697
+<     Ns_Time wait = { 0, 0 };
+---
+> 
+>    // Commented by Majid
+>    //Ns_Time wait = { 0, 0 };
+693,694c714,718
+<     wait.sec = ms->timeout;
+<     rc = Ns_SockWrite(conn->sock, conn->ds.string, conn->ds.length, &wait);
+---
+>     // Commented by Majid
+>     //wait.sec = ms->timeout;
+>     //rc = Ns_SockWrite(conn->sock, conn->ds.string, conn->ds.length, &wait);
+> 
+>     rc = Ns_SockWrite(conn->sock, conn->ds.string, conn->ds.length, ms->timeout); // Added by Majid
+765c789,791
+<     Ns_Time wait = { 0, 0 };
+---
+> 
+>    // Commented by Majid
+>    //Ns_Time wait = { 0, 0 };
+782,783c808,812
+<     wait.sec = ms->timeout;
+<     rc = Ns_SockWrite(conn->sock, conn->ds.string, conn->ds.length, &wait);
+---
+>    // Commented by Majid
+>    // wait.sec = ms->timeout;
+>    // rc = Ns_SockWrite(conn->sock, conn->ds.string, conn->ds.length, &wait);
+> 
+>     rc = Ns_SockWrite(conn->sock, conn->ds.string, conn->ds.length, ms->timeout);// Added By Majid
+817c846,848
+<     Ns_Time wait = { 0, 0 };
+---
+> 
+>    // Commented by Majid
+>    //Ns_Time wait = { 0, 0 };
+834,835c865,869
+<     wait.sec = ms->timeout;
+<     rc = Ns_SockWrite(conn->sock, conn->ds.string, conn->ds.length, &wait);
+---
+>     // Commented by Majid
+>     //wait.sec = ms->timeout;
+>     //rc = Ns_SockWrite(conn->sock, conn->ds.string, conn->ds.length, &wait);
+> 
+>     rc = Ns_SockWrite(conn->sock, conn->ds.string, conn->ds.length, ms->timeout); //Added by Majid
+871c905,907
+<     Ns_Time wait = { 0, 0 };
+---
+> 
+>     // Commented by Majid
+>     //Ns_Time wait = { 0, 0 };
+883,884c919,922
+<     wait.sec = ms->timeout;
+<     rc = Ns_SockWrite(conn->sock, conn->ds.string, conn->ds.length, &wait);
+---
+>     // Commented by Majid
+>     //wait.sec = ms->timeout;
+>     //rc = Ns_SockWrite(conn->sock, conn->ds.string, conn->ds.length, &wait);
+>     rc = Ns_SockWrite(conn->sock, conn->ds.string, conn->ds.length, ms->timeout);// Added By Majid
+920c958,960
+<     Ns_Time wait = { 0, 0 };
+---
+> 
+>     // Commented by Majid
+>     //Ns_Time wait = { 0, 0 };
+946,947c986,990
+<     wait.sec = ms->timeout;
+<     rc = Ns_SockWriteV(conn->sock, vec, 3, &wait);
+---
+>     // commented by Majid
+>     //wait.sec = ms->timeout;
+>     //rc = Ns_SockWriteV(conn->sock, vec, 3, &wait);
+> 
+>     rc = Ns_SockWriteV(conn->sock, vec, 3, ms->timeout); // Added by Majid
