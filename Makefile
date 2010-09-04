@@ -1,5 +1,5 @@
 ifndef AOLSERVER
-    AOLSERVER  = /bayt/software/aol/aolmajid-khan
+    AOLSERVER  = ../aolserver/
 endif
 
 #

@@ -20,7 +20,7 @@
  * version of this file under either the License or the GPL.
  */
 
-/* Added By Majid majidkhan59@gmail.com
+/* Added By Majid majidkhan59@yahoo.com
  * Following structure and functions have been copied from tclobjv.c
  * http://naviserver.cvs.sourceforge.net/naviserver/naviserver/nsd/tclobjv.c?revision=1.17&view=markup
  */

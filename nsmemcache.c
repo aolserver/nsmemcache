@@ -31,8 +31,6 @@
  *
  *     Vlad Seryakov vlad@crystalballinc.com
  *
- * Ported for AOLserver by:
- *	Majid Khan majidkhan59@gmail.com
  */
 
 #include "ns.h"
@@ -88,7 +86,7 @@ static int mc_get(mc_t *mc, char* key, char **data, size_t *length, uint16_t *fl
 static int mc_set(mc_t *mc, char* cmd, char* key, char *data, uint32_t data_size, uint32_t timeout, uint16_t flags);
 static int mc_areplace(mc_t *mc, char* key, char *data, uint32_t data_size, uint32_t timeout, uint16_t flags,
                        char **data2, size_t *length2, uint16_t *flags2);
-static int mc_delete(mc_t *mc, char* key, uint32_t timeout);
+static int mc_delete(mc_t *mc, char* key);
 static int mc_incr(mc_t *mc, char *cmd, char* key, int32_t n, uint32_t *new_value);
 static int mc_version(mc_t *mc, mc_server_t *ms,  char **data);
 static int MCInterpInit(Tcl_Interp * interp, void *arg);
@@ -203,8 +201,8 @@ static int MCCmd(ClientData arg, Tcl_Interp * interp, int objc, Tcl_Obj * CONST 
 {
     mc_t *mc = arg;
     mc_server_t *ms;
-    char *key, *data;
     uint16_t flags = 0;
+    char *key, *data=NULL;
     uint32_t size, expires = 0;
     int cmd;
 
@@ -247,7 +245,7 @@ static int MCCmd(ClientData arg, Tcl_Interp * interp, int objc, Tcl_Obj * CONST 
            return TCL_ERROR;
        }
        key = Tcl_GetString(objv[2]);
-       cmd = mc_get(mc, key, &data, (size_t *) &size, &flags);// casted 4th arghment by Majid
+       cmd = mc_get(mc, key, &data, &size, &flags);
        if (cmd == 1) {
            Tcl_SetVar2Ex(interp, Tcl_GetString(objv[3]), NULL, Tcl_NewByteArrayObj((uint8_t*)data, size), 0);
            if (objc > 4) {
@@ -258,6 +256,7 @@ static int MCCmd(ClientData arg, Tcl_Interp * interp, int objc, Tcl_Obj * CONST 
            }
        }
        Tcl_SetObjResult(interp, Tcl_NewIntObj(cmd));
+       ns_free(data); 		
        break;
 
     case cmdAdd:
@@ -294,7 +293,7 @@ static int MCCmd(ClientData arg, Tcl_Interp * interp, int objc, Tcl_Obj * CONST 
        break;
 
     case cmdAReplace: {
-       char *data2, *outVar = NULL, *outSize = NULL, *outFlags = NULL;
+       char *data2=NULL, *outVar = NULL, *outSize = NULL, *outFlags = NULL;
        u_int32_t size2 = 0;
        u_int16_t flags2 = 0;
 
@@ -316,7 +315,7 @@ static int MCCmd(ClientData arg, Tcl_Interp * interp, int objc, Tcl_Obj * CONST 
        if (Ns_ParseObjv(opts, args, interp, 2, objc, objv) != NS_OK) {
            return TCL_ERROR;
        }
-       cmd = mc_areplace(mc, key, data, size, expires, flags, &data2, (size_t*) &size2, &flags2);// casted 8th arghment by Majid
+       cmd = mc_areplace(mc, key, data, size, expires, flags, &data2, &size2, &flags2);
        if (cmd == 1) {
            if (outVar != NULL) {
                Tcl_SetVar2Ex(interp, outVar, NULL, Tcl_NewByteArrayObj((uint8_t*)data2, size2), 0);
@@ -328,6 +327,7 @@ static int MCCmd(ClientData arg, Tcl_Interp * interp, int objc, Tcl_Obj * CONST 
              Tcl_SetVar2Ex(interp, outFlags, NULL, Tcl_NewIntObj(flags2), 0);
            }
        }
+       ns_free(data2);
        Tcl_SetObjResult(interp, Tcl_NewIntObj(cmd));
        break;
     }
@@ -341,7 +341,7 @@ static int MCCmd(ClientData arg, Tcl_Interp * interp, int objc, Tcl_Obj * CONST 
        if (objc > 3) {
            expires = atoi(Tcl_GetString(objv[3]));
        }
-       cmd = mc_delete(mc, key, expires);
+       cmd = mc_delete(mc, key);
        Tcl_SetObjResult(interp, Tcl_NewIntObj(cmd));
        break;
 
@@ -380,6 +380,7 @@ static int MCCmd(ClientData arg, Tcl_Interp * interp, int objc, Tcl_Obj * CONST 
            mc_version(mc, ms, &data);
            if (data != NULL) {
                Tcl_SetObjResult(interp, Tcl_NewStringObj(data, -1));
+	       ns_free(data);
            }
        }
        break;
@@ -404,11 +405,9 @@ static mc_conn_t *mc_conn_create(mc_server_t *ms)
 {
     int sock;
     mc_conn_t *conn;
-
-    // Commented by Majid
-    //Ns_Time timeout = { TIMEOUT, 0 };
-    //sock = Ns_SockTimedConnect((char*)ms->host, ms->port, &timeout);
-    sock = Ns_SockTimedConnect((char*)ms->host, ms->port, ms->timeout);// Added by Majid
+    int timeout = TIMEOUT;
+    
+    sock = Ns_SockTimedConnect((char*)ms->host, ms->port, timeout);
     if (sock == -1) {
         Ns_Log(Error, "nsmemcache: unable to connect to %s:%d", ms->host, ms->port);
         return NULL;
@@ -460,17 +459,15 @@ static void mc_conn_put(mc_conn_t * conn)
 static int mc_conn_read(mc_conn_t * conn, int len, int reset, char **line)
 {
     int nread, n, i;
-    //Ns_Time timeout = { conn->ms->timeout, 0 }; // commented by Majid
-
+    int timeout = conn->ms->timeout;
+ 
     if (reset) {
         Ns_DStringSetLength(&conn->ds, 0);
     }
     nread = conn->ds.length;
     Ns_DStringSetLength(&conn->ds, nread + len);
     while (len > 0) {
-        n = Ns_SockRecv(conn->sock, conn->ds.string + nread, len, conn->ms->timeout); // Added by Majid
-        //n = Ns_SockRecv(conn->sock, conn->ds.string + nread, len, &timeout); //commented by Majid
-
+        n = Ns_SockRecv(conn->sock, conn->ds.string + nread, len, timeout); 
         if (n <= 0) {
             break;
         }
@@ -625,9 +622,6 @@ static int mc_set(mc_t *mc, char* cmd, char* key, char *data, uint32_t data_size
     mc_server_t* ms;
     mc_conn_t* conn;
     struct iovec vec[3];
-   
-   // Commented by Majid
-   //Ns_Time wait = { 0, 0 };
 
     hash = mc_hash(key, strlen(key));
     ms = mc_server_find_hash(mc, hash);
@@ -641,7 +635,6 @@ static int mc_set(mc_t *mc, char* cmd, char* key, char *data, uint32_t data_size
     }
 
     /* <command name> <key> <flags> <exptime> <bytes>\r\n<data>\r\n */
-
     Ns_DStringPrintf(&conn->ds, "%s %s %u %u %u\r\n", cmd, key, flags, timeout, data_size);
 
     vec[0].iov_base = conn->ds.string;
@@ -653,11 +646,7 @@ static int mc_set(mc_t *mc, char* cmd, char* key, char *data, uint32_t data_size
     vec[2].iov_base = "\r\n";
     vec[2].iov_len  = 2;
 
-    // Commented out by Majid
-    //wait.sec = ms->timeout;
-    //rc = Ns_SockWriteV(conn->sock, vec, 3, &wait);
-    
-    rc = Ns_SockWriteV(conn->sock, vec, 3, ms->timeout);// Added by Majid
+    rc = Ns_SockSendBufs(conn->sock, vec, 3, ms->timeout,0);
     if (rc <= 0) {
         mc_conn_free(conn);
         mc_server_dead(mc, ms);
@@ -670,17 +659,20 @@ static int mc_set(mc_t *mc, char* cmd, char* key, char *data, uint32_t data_size
         mc_server_dead(mc, ms);
         return -1;
     }
-    mc_conn_put(conn);
 
     if (strcmp(conn->ds.string, "STORED\r\n") == 0) {
+        mc_conn_put(conn);
         return 1;
-    } else
-    if (strcmp(conn->ds.string, "NOT_STORED\r\n") == 0) {
-        return 0;
-    } else {
-        Ns_Log(Error, "nsmemcache: unknown response from %s:%d: %s", ms->host, ms->port, conn->ds.string);
-        return -1;
     }
+ 
+    if (strcmp(conn->ds.string, "NOT_STORED\r\n") == 0) {
+        mc_conn_put(conn);
+        return 0;
+    } 
+
+    Ns_Log(Error, "nsmemcache: unknown response from %s:%d: %s", ms->host, ms->port, conn->ds.string);
+    mc_conn_put(conn);
+    return -1;
 }
 
 static int mc_get(mc_t *mc, char* key, char **data, size_t *length, uint16_t *flags)
@@ -690,11 +682,8 @@ static int mc_get(mc_t *mc, char* key, char **data, size_t *length, uint16_t *fl
     mc_server_t* ms;
     mc_conn_t* conn;
     char *line = NULL;
-    const char *ptr;
-    size_t total, len = 0;
-
-   // Commented by Majid
-   //Ns_Time wait = { 0, 0 };
+    char *ptr;
+    size_t offset, total, len = 0;
 
     hash = mc_hash(key, strlen(key));
     ms = mc_server_find_hash(mc, hash);
@@ -711,11 +700,7 @@ static int mc_get(mc_t *mc, char* key, char **data, size_t *length, uint16_t *fl
 
     Ns_DStringPrintf(&conn->ds, "get %s\r\n", key);
 
-    // Commented by Majid
-    //wait.sec = ms->timeout;
-    //rc = Ns_SockWrite(conn->sock, conn->ds.string, conn->ds.length, &wait);
-
-    rc = Ns_SockWrite(conn->sock, conn->ds.string, conn->ds.length, ms->timeout); // Added by Majid
+    rc = Ns_SockSend(conn->sock, conn->ds.string, conn->ds.length, ms->timeout);
 
     if (rc <= 0) {
         mc_conn_free(conn);
@@ -753,9 +738,10 @@ static int mc_get(mc_t *mc, char* key, char **data, size_t *length, uint16_t *fl
             mc_conn_put(conn);
             return -1;
         }
-
+	
+	offset = line - conn->ds.string;
         // Calculate total response buffer size: header + data + footer
-        total = (line - conn->ds.string) + len + 7;
+        total = offset + len + 7;
         if (rc < total) {
             rc = mc_conn_read(conn, total - rc, 0, 0);
         }
@@ -764,31 +750,29 @@ static int mc_get(mc_t *mc, char* key, char **data, size_t *length, uint16_t *fl
             return -1;
         }
         *data = ns_malloc(len + 1);
-        strncpy(*data, line, len);
+        strncpy(*data, &conn->ds.string[offset], len);
 
         mc_conn_put(conn);
         return 1;
     }
-    mc_conn_put(conn);
 
     if (strncmp(conn->ds.string, "END\r\n", 5) == 0) {
+        mc_conn_put(conn);
         return 0;
-    } else {
-        Ns_Log(Error, "nsmemcache: unknown response from %s:%d: %s", ms->host, ms->port, conn->ds.string);
-        return -1;
-    }
+    } 
+    
+    Ns_Log(Error, "nsmemcache: unknown response from %s:%d: %s", ms->host, ms->port, conn->ds.string);
+    mc_conn_put(conn);
+    return -1;
 }
 
-static int mc_delete(mc_t *mc, char* key, uint32_t timeout)
+static int mc_delete(mc_t *mc, char* key)
 {
     int rc;
     char *line;
     mc_server_t* ms;
     mc_conn_t* conn;
     uint32_t hash;
-
-   // Commented by Majid
-   //Ns_Time wait = { 0, 0 };
 
     hash = mc_hash(key, strlen(key));
     ms = mc_server_find_hash(mc, hash);
@@ -803,13 +787,9 @@ static int mc_delete(mc_t *mc, char* key, uint32_t timeout)
 
     /* delete <key> <time>\r\n */
 
-    Ns_DStringPrintf(&conn->ds, "delete %s %u\r\n", key, timeout);
+    Ns_DStringPrintf(&conn->ds, "delete %s \r\n", key);
 
-   // Commented by Majid
-   // wait.sec = ms->timeout;
-   // rc = Ns_SockWrite(conn->sock, conn->ds.string, conn->ds.length, &wait);
-
-    rc = Ns_SockWrite(conn->sock, conn->ds.string, conn->ds.length, ms->timeout);// Added By Majid
+    rc = Ns_SockSend(conn->sock, conn->ds.string, conn->ds.length, ms->timeout);
 
     if (rc <= 0) {
         mc_conn_free(conn);
@@ -823,17 +803,20 @@ static int mc_delete(mc_t *mc, char* key, uint32_t timeout)
         mc_server_dead(mc, ms);
         return -1;
     }
-    mc_conn_put(conn);
 
     if (strcmp(conn->ds.string, "DELETED\r\n") == 0) {
+	mc_conn_put(conn);
         return 1;
-    } else
+    } 
+
     if (strcmp(conn->ds.string, "NOT_FOUND\r\n") == 0) {
+	mc_conn_put(conn);	
         return 0;
-    } else {
-        Ns_Log(Error, "nsmemcache: unknown response from %s:%d: %s", ms->host, ms->port, conn->ds.string);
-        return -1;
-    }
+    } 
+
+    Ns_Log(Error, "nsmemcache: unknown response from %s:%d: %s", ms->host, ms->port, conn->ds.string);
+    mc_conn_put(conn);
+    return -1;
 }
 
 static int mc_incr(mc_t *mc, char* cmd, char* key, const int32_t inc, uint32_t *new_value)
@@ -843,9 +826,6 @@ static int mc_incr(mc_t *mc, char* cmd, char* key, const int32_t inc, uint32_t *
     mc_server_t* ms;
     mc_conn_t* conn;
     uint32_t hash;
-
-   // Commented by Majid
-   //Ns_Time wait = { 0, 0 };
 
     hash = mc_hash(key, strlen(key));
     ms = mc_server_find_hash(mc, hash);
@@ -862,11 +842,7 @@ static int mc_incr(mc_t *mc, char* cmd, char* key, const int32_t inc, uint32_t *
 
     Ns_DStringPrintf(&conn->ds, "%s %s %u\r\n", cmd, key, inc);
 
-    // Commented by Majid
-    //wait.sec = ms->timeout;
-    //rc = Ns_SockWrite(conn->sock, conn->ds.string, conn->ds.length, &wait);
-
-    rc = Ns_SockWrite(conn->sock, conn->ds.string, conn->ds.length, ms->timeout); //Added by Majid
+    rc = Ns_SockSend(conn->sock, conn->ds.string, conn->ds.length, ms->timeout);
 
     if (rc <= 0) {
         mc_conn_free(conn);
@@ -882,19 +858,22 @@ static int mc_incr(mc_t *mc, char* cmd, char* key, const int32_t inc, uint32_t *
         mc_server_dead(mc, ms);
         return -1;
     }
-    mc_conn_put(conn);
 
     if (strcmp(conn->ds.string, "ERROR\r\n") == 0) {
+        mc_conn_put(conn);
         return -1;
-    } else
+    } 
+
     if (strcmp(conn->ds.string, "NOT_FOUND\r\n") == 0) {
+        mc_conn_put(conn);
         return 0;
-    } else {
-        if (new_value) {
-            *new_value = atoi(conn->ds.string);
-        }
-        return 1;
     }
+    
+    if (new_value) {
+    	*new_value = atoi(conn->ds.string);
+    }
+    mc_conn_put(conn);
+    return 1;
 }
 
 static int mc_version(mc_t *mc, mc_server_t *ms, char **data)
@@ -902,9 +881,6 @@ static int mc_version(mc_t *mc, mc_server_t *ms, char **data)
     int rc;
     char *line;
     mc_conn_t* conn;
-
-    // Commented by Majid
-    //Ns_Time wait = { 0, 0 };
 
     conn = mc_conn_get(ms);
     if (conn == NULL) {
@@ -916,10 +892,7 @@ static int mc_version(mc_t *mc, mc_server_t *ms, char **data)
 
     Ns_DStringPrintf(&conn->ds, "version\r\n");
 
-    // Commented by Majid
-    //wait.sec = ms->timeout;
-    //rc = Ns_SockWrite(conn->sock, conn->ds.string, conn->ds.length, &wait);
-    rc = Ns_SockWrite(conn->sock, conn->ds.string, conn->ds.length, ms->timeout);// Added By Majid
+    rc = Ns_SockSend(conn->sock, conn->ds.string, conn->ds.length, ms->timeout);
 
     if (rc <= 0) {
         mc_conn_free(conn);
@@ -935,16 +908,17 @@ static int mc_version(mc_t *mc, mc_server_t *ms, char **data)
         mc_server_dead(mc, ms);
         return -1;
     }
-    mc_conn_put(conn);
 
     if (strncmp(conn->ds.string, "VERSION ", 8) == 0) {
         if (data) {
             *data = ns_strdup(Ns_StrTrimRight(conn->ds.string+8));
         }
-        return 1;
+        rc = 1;
     } else {
-        return 0;
+        rc = 0;
     }
+    mc_conn_put(conn);
+    return rc;
 }
 
 static int mc_areplace(mc_t *mc, char* key, char *data, uint32_t data_size, uint32_t timeout, uint16_t flags, char **data2, size_t *length2, uint16_t *flags2)
@@ -955,9 +929,7 @@ static int mc_areplace(mc_t *mc, char* key, char *data, uint32_t data_size, uint
     mc_server_t* ms;
     mc_conn_t* conn;
     struct iovec vec[3];
-
-    // Commented by Majid
-    //Ns_Time wait = { 0, 0 };
+    size_t offset;
 
     hash = mc_hash(key, strlen(key));
     ms = mc_server_find_hash(mc, hash);
@@ -983,11 +955,8 @@ static int mc_areplace(mc_t *mc, char* key, char *data, uint32_t data_size, uint
     vec[2].iov_base = "\r\n";
     vec[2].iov_len  = 2;
 
-    // commented by Majid
-    //wait.sec = ms->timeout;
-    //rc = Ns_SockWriteV(conn->sock, vec, 3, &wait);
+    rc = Ns_SockSendBufs(conn->sock, vec, 3, ms->timeout,0);
 
-    rc = Ns_SockWriteV(conn->sock, vec, 3, ms->timeout); // Added by Majid
     if (rc <= 0) {
         mc_conn_free(conn);
         mc_server_dead(mc, ms);
@@ -1000,11 +969,11 @@ static int mc_areplace(mc_t *mc, char* key, char *data, uint32_t data_size, uint
         mc_server_dead(mc, ms);
         return -1;
     }
-    mc_conn_put(conn);
 
     if (strcmp(conn->ds.string, "NOT_STORED\r\n") == 0) {
+        mc_conn_put(conn);
         return 0;
-    } else
+    } 
 
     if (strncmp(conn->ds.string, "VALUE ", 6) == 0) {
         ptr = ns_strtok(conn->ds.string," ");
@@ -1026,8 +995,9 @@ static int mc_areplace(mc_t *mc, char* key, char *data, uint32_t data_size, uint
             *length2 = len;
         }
         if (*line) {
-            memmove(conn->ds.string, line, rc - (line - conn->ds.string));
-            Ns_DStringSetLength(&conn->ds, rc - (line - conn->ds.string));
+	    offset = line - conn->ds.string;
+            memmove(conn->ds.string, &conn->ds.string[offset], rc - offset);
+            Ns_DStringSetLength(&conn->ds, rc - offset);
         } else {
             Ns_DStringSetLength(&conn->ds, 0);
         }
@@ -1058,9 +1028,11 @@ static int mc_areplace(mc_t *mc, char* key, char *data, uint32_t data_size, uint
     }
 
     if (strncmp(conn->ds.string, "END\r\n", 5) == 0) {
-        return 0;
-    } else {
-        Ns_Log(Error, "nsmemcache: unknown response from %s:%d: %s", ms->host, ms->port, conn->ds.string);
-        return -1;
-    }
+	mc_conn_put(conn);     
+	return 0;
+    } 
+
+    Ns_Log(Error, "nsmemcache: unknown response from %s:%d: %s", ms->host, ms->port, conn->ds.string);
+    mc_conn_put(conn);
+    return -1;
 }

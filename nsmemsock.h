@@ -27,40 +27,23 @@
  * version of this file under either the License or the GPL.
  */
  
-/* Added by Majid: majidkhan59@gmail.com
+/* Added by Majid: majidkhan59@yahoo.com
  * Following functions have been taken from Naviserver sock.c file
  * http://naviserver.cvs.sourceforge.net/naviserver/naviserver/nsd/sock.c?revision=1.17&view=markup
  * but have been modified according to AOL sock.c 
  */
 
-/*
- *----------------------------------------------------------------------
- *
- * SockSend --
- *
- *      Send a vector of buffers on a non-blocking socket. Not all
- *      data may be sent.
- *
- * Results:
- *      Number of bytes sent or -1 on error.
- *
- * Side effects:
- *      None.
- *
- *----------------------------------------------------------------------
-*/ 
+size_t Ns_SetVec(struct iovec *iov, int i, CONST void *data, size_t len);
 
 static int
 SockSend(SOCKET sock, struct iovec *bufs, int nbufs)
 {
+#ifdef _WIN32
     int n;
 
-#ifdef _WIN32
-    if (WSASend(sock, (LPWSABUF)bufs, nbufs, &n, 0,
-                NULL, NULL) != 0) {
-        n = -1;
+    if (WSASend(sock, (LPWSABUF)bufs, nbufs, &n, 0, NULL, NULL) != 0) {
+	n = -1;
     }
-
     return n;
 #else
     struct msghdr msg;
@@ -68,154 +51,139 @@ SockSend(SOCKET sock, struct iovec *bufs, int nbufs)
     memset(&msg, 0, sizeof(msg));
     msg.msg_iov = bufs;
     msg.msg_iovlen = nbufs;
-
-    n = sendmsg(sock, &msg, 0);
-
-    if (n < 0) {
-        Ns_Log(Debug, "SockSend: %s",
-               ns_sockstrerror(ns_sockerrno));
-    }
-    return n;
+    return sendmsg(sock, &msg, 0);
 #endif
-}
-
-/*
- *----------------------------------------------------------------------
- *
- * Ns_SockSendBufs --
- *
- *      Send a vector of buffers on a non-blocking socket. Not all
- *      data may be sent.
- *
- * Results:
- *      Number of bytes sent or -1 on error.
- *
- * Side effects:
- *      May wait for given timeout if first attempt would block.
- *
- *----------------------------------------------------------------------
- */
-
-int
-Ns_SockSendBufs(SOCKET sock, struct iovec *bufs, int nbufs,
-                int timeout)
-{
-    int n;
-
-    n = SockSend(sock, bufs, nbufs);
-    if (n < 0
-        && ns_sockerrno == EWOULDBLOCK
-        && Ns_SockWait(sock, NS_SOCK_WRITE, timeout) == NS_OK) {
-        n = SockSend(sock, bufs, nbufs);
-    }
-
-    return n;
 }
 
 /*----------------------------------------------------------------------
  *
- * Ns_SockWrite --
+ * Ns_ResetVec --
  *
- *      Timed write to a non-blocking socket.
- *      This function will try write all of the data
+ *      Zero the bufs which have had their data sent and adjust
+ *      the remainder.
  *
  * Results:
- *      Number of bytes written, -1 for error
+ *      Index of first buf to send.
  *
  * Side effects:
- *      May wait given timeout.
+ *      Updates offset and length members.
  *
  *----------------------------------------------------------------------
- */
+*/
 
 int
-Ns_SockWrite(SOCKET sock, void *vbuf, size_t towrite, int time)
+Ns_ResetVec(struct iovec *iov, int nbufs, size_t sent)
 {
-    int nwrote, n;
-    char *buf;
+    int     i;
+    void   *data;
+    size_t  len;
 
-    nwrote = towrite;
-    buf = vbuf;
-    while (towrite > 0) {
-        n = Ns_SockSend(sock, buf, towrite, time);
-        if (n < 0) {
-            return -1;
+    for (i = 0; i < nbufs && sent > 0; i++) {
+
+        data = iov[i].iov_base;
+        len  = iov[i].iov_len;
+
+        if (len > 0) {
+            if (sent >= len) {
+                sent -= len;
+                Ns_SetVec(iov, i, NULL, 0);
+            } else {
+                Ns_SetVec(iov, i, data + sent, len - sent);
+                break;
+            }
         }
-        towrite -= n;
-        buf += n;
     }
-    return nwrote;
+    return i;
 }
 
-/*
- *----------------------------------------------------------------------
+/*----------------------------------------------------------------------
  *
- * Ns_SockWriteV --
+ * Ns_SetVec --
  *
- *      Send buffers to client, it will try to send all data
+ *      Set the fields of the given iovec.
  *
  * Results:
- *      Number of bytes of given buffers written, -1 for
- *      error on first send.
+ *      The given length.
  *
  * Side effects:
- *      May send data in multiple packets if nbufs is large.
+ *      None.
  *
  *----------------------------------------------------------------------
- */
+*/ 
 
-int
-Ns_SockWriteV(SOCKET sock, struct iovec *bufs, int nbufs, int time)
+size_t
+Ns_SetVec(struct iovec *iov, int i, CONST void *data, size_t len)
+{
+    iov[i].iov_base = (void *) data;
+    iov[i].iov_len = len;
+
+    return len;
+}
+
+
+int Ns_SockSendBufs(SOCKET sock, struct iovec *bufs, int nbufs, int timeout, int flags)
 {
     int           sbufLen, sbufIdx = 0, nsbufs = 0, bufIdx = 0;
     int           nwrote = 0, towrite = 0, sent = -1;
+    void         *data;
+    int           len;
     struct iovec  sbufs[UIO_MAXIOV], *sbufPtr;
 
     sbufPtr = sbufs;
     sbufLen = UIO_MAXIOV;
 
     while (bufIdx < nbufs || towrite > 0) {
-
+	/*
+         * Send up to UIO_MAXIOV buffers of data at a time and strip out
+         * empty buffers.
+         */
         while (bufIdx < nbufs && sbufIdx < sbufLen) {
-            if (bufs[bufIdx].iov_len > 0 && bufs[bufIdx].iov_base != NULL) {
-                sbufPtr[sbufIdx].iov_base = bufs[bufIdx].iov_base;
-                sbufPtr[sbufIdx].iov_len = bufs[bufIdx].iov_len;
-                towrite += sbufPtr[sbufIdx].iov_len;
-                sbufIdx++;
+	    data = bufs[bufIdx].iov_base;
+            len  = bufs[bufIdx].iov_len;
+
+            if (len > 0 && data != NULL) {
+                towrite += Ns_SetVec(sbufPtr, sbufIdx++, data, len);
                 nsbufs++;
             }
             bufIdx++;
         }
-
-        sent = Ns_SockSendBufs(sock, sbufPtr, nsbufs, time);
-        if (sent < 0) {
-            return -1;
+	/*
+         * Timeout once if first attempt would block.
+         */
+	sent = SockSend(sock, sbufPtr, nsbufs);
+        if (sent < 0
+            && ns_sockerrno == EWOULDBLOCK
+            && Ns_SockWait(sock, NS_SOCK_WRITE, timeout) == NS_OK) {
+            sent = SockSend(sock, sbufPtr, nsbufs);
         }
+        if (sent < 0) {
+            break;
+        }
+
         towrite -= sent;
         nwrote  += sent;
 
         if (towrite > 0) {
-            for (sbufIdx = 0; sbufIdx < nsbufs && sent > 0; sbufIdx++) {
-                if (sent >= (int) sbufPtr[sbufIdx].iov_len) {
-                    sent -= sbufPtr[sbufIdx].iov_len;
-                } else {
-                    sbufPtr[sbufIdx].iov_base = (char *) sbufPtr[sbufIdx].iov_base + sent;
-                    sbufPtr[sbufIdx].iov_len -= sent;
-                    break;
-                }
-            }
+	    sbufIdx = Ns_ResetVec(sbufPtr, nsbufs, sent);
+            nsbufs -= sbufIdx;
+
+	     /*
+             * If there are more whole buffers to send, move the remaining unsent
+             * buffers to the beginning of the iovec array so that we always send
+             * the maximum number of buffers the OS can handle.
+             */
+
             if (bufIdx < nbufs - 1) {
                 memmove(sbufPtr, sbufPtr + sbufIdx, (size_t) sizeof(struct iovec) * nsbufs);
             } else {
                 sbufPtr = sbufPtr + sbufIdx;
                 sbufLen = nsbufs - sbufIdx;
             }
-            nsbufs -= sbufIdx;
         } else {
             nsbufs = 0;
         }
         sbufIdx = 0;
     }
-    return nwrote;
+    return nwrote ? nwrote : sent;
 }
 

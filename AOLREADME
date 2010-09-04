@@ -1,13 +1,3 @@
-Memcache client for AOLServer 4.0.10
-Release 0.1
-majidkhan59@yahoo.com
-
-This is AOLServer module that implements client protocol to communicate with
-memcached server
-
-/*--------------------------------------------------------------------*/
-
-
  Configuration
  
    nsd.tcl
@@ -41,8 +31,43 @@ memcached server
 
    ns_memcache decr key value ?varname?
 
+   ns_memcache version ?ip?
 
  Authors
  
      Vlad Seryakov vlad@crystalballinc.com
 
+ Ported For AOLServer By:
+     Majid Khan majidkhan59@yahoo.com
+ Example:
+
+1)
+   set check [ns_memcache version "192.168.5.8"]
+   print $check
+
+2)
+   # store the value for 1 min i.e. 60secs
+   ns_memcache set firstkey firstvalue 60
+
+3)
+   # Will delete firstkey and then you can define another or add another key instantly
+   ns_memcache delete firstkey 
+
+   # But if you delete the firstkey with epxiry then the delted key will be never be added
+   # untill the expiry time becomes over.
+   # firstkey can only be set after 1 min not before then that
+   ns_memcache delete firstkey 60
+
+4)
+   # The below will increment the value 3 to what our the value of the key is in the memory 
+   ns_memcache incr firstkey 3
+
+5) This one is incomplete one... :( 
+   # The below will increment the value 3 to what our the value of the key is in the memory
+   ns_memcache decr firstkey
+
+
+6)
+   # Replace the key value with the new one
+   # but the value should be set in the memmory first see above the seond example
+   ns_memcache replace key value
